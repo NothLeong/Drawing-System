@@ -1,0 +1,7 @@
+    clear
+    draw line from (95.11,-30.90) to (-58.78,80.90)
+    draw line from (95.11,-30.90) to (-95.11,-30.90)
+    draw line from (0,-100) to (-58.78,80.90)
+    draw line from (-95.11,-30.90) to (58.78,80.90)
+    draw line from (0,-100) to (58.78,80.90)
+    draw circle on (0,0) -r 100

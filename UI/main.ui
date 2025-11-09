@@ -1,0 +1,231 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>Drawing</class>
+ <widget class="QDialog" name="Drawing">
+  <property name="geometry">
+   <rect>
+    <x>0</x>
+    <y>0</y>
+    <width>528</width>
+    <height>594</height>
+   </rect>
+  </property>
+  <property name="windowTitle">
+   <string>Drawing</string>
+  </property>
+  <property name="toolTipDuration">
+   <number>4</number>
+  </property>
+  <property name="styleSheet">
+   <string notr="true">background-color: lightgray;</string>
+  </property>
+  <layout class="QVBoxLayout" name="verticalLayout_2">
+   <item alignment="Qt::AlignLeft|Qt::AlignTop">
+    <widget class="QFrame" name="horizontalFrame">
+     <property name="minimumSize">
+      <size>
+       <width>0</width>
+       <height>30</height>
+      </size>
+     </property>
+     <property name="maximumSize">
+      <size>
+       <width>16777215</width>
+       <height>50</height>
+      </size>
+     </property>
+     <layout class="QHBoxLayout" name="horizontalLayout" stretch="0,0">
+      <item>
+       <widget class="QTextEdit" name="cmd_in">
+        <property name="minimumSize">
+         <size>
+          <width>400</width>
+          <height>50</height>
+         </size>
+        </property>
+        <property name="styleSheet">
+         <string notr="true">background-color: white;</string>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QCommandLinkButton" name="enter">
+        <property name="minimumSize">
+         <size>
+          <width>0</width>
+          <height>50</height>
+         </size>
+        </property>
+        <property name="maximumSize">
+         <size>
+          <width>100</width>
+          <height>16777215</height>
+         </size>
+        </property>
+        <property name="styleSheet">
+         <string notr="true">background-color: blue;</string>
+        </property>
+        <property name="text">
+         <string>Enter</string>
+        </property>
+       </widget>
+      </item>
+     </layout>
+    </widget>
+   </item>
+   <item>
+    <widget class="QFrame" name="horizontalFrame_2">
+     <property name="minimumSize">
+      <size>
+       <width>500</width>
+       <height>350</height>
+      </size>
+     </property>
+     <layout class="QHBoxLayout" name="horizontalLayout_2">
+      <item>
+       <widget class="QWidget" name="toolbox" native="true">
+        <property name="layoutDirection">
+         <enum>Qt::LeftToRight</enum>
+        </property>
+        <property name="styleSheet">
+         <string notr="true">background-color: rgb(243, 237, 220);</string>
+        </property>
+        <layout class="QVBoxLayout" name="verticalLayout">
+         <property name="sizeConstraint">
+          <enum>QLayout::SetDefaultConstraint</enum>
+         </property>
+         <item>
+          <widget class="QToolButton" name="point">
+           <property name="styleSheet">
+            <string notr="true">background-color: gray;</string>
+           </property>
+           <property name="text">
+            <string>点</string>
+           </property>
+          </widget>
+         </item>
+         <item>
+          <widget class="QToolButton" name="line">
+           <property name="styleSheet">
+            <string notr="true">background-color: gray;</string>
+           </property>
+           <property name="text">
+            <string>直线</string>
+           </property>
+          </widget>
+         </item>
+         <item>
+          <widget class="QToolButton" name="rectangle">
+           <property name="styleSheet">
+            <string notr="true">background-color: gray;</string>
+           </property>
+           <property name="text">
+            <string>矩形</string>
+           </property>
+          </widget>
+         </item>
+         <item>
+          <widget class="QToolButton" name="ellipse">
+           <property name="layoutDirection">
+            <enum>Qt::LeftToRight</enum>
+           </property>
+           <property name="styleSheet">
+            <string notr="true">background-color: gray;</string>
+           </property>
+           <property name="text">
+            <string>椭圆</string>
+           </property>
+          </widget>
+         </item>
+         <item>
+          <widget class="QToolButton" name="circle">
+           <property name="styleSheet">
+            <string notr="true">background-color: gray;</string>
+           </property>
+           <property name="text">
+            <string>圆</string>
+           </property>
+          </widget>
+         </item>
+         <item>
+          <widget class="QToolButton" name="move">
+           <property name="styleSheet">
+            <string notr="true">background-color: gray;</string>
+           </property>
+           <property name="text">
+            <string>移动</string>
+           </property>
+          </widget>
+         </item>
+         <item>
+          <widget class="QToolButton" name="color_choose">
+           <property name="styleSheet">
+            <string notr="true">background-color: gray;</string>
+           </property>
+           <property name="text">
+            <string>颜色</string>
+           </property>
+          </widget>
+         </item>
+         <item>
+          <widget class="QToolButton" name="fill_toggle">
+           <property name="styleSheet">
+            <string notr="true">background-color: gray;</string>
+           </property>
+           <property name="text">
+            <string>填充</string>
+           </property>
+          </widget>
+         </item>
+         <item>
+          <widget class="QToolButton" name="save">
+           <property name="styleSheet">
+            <string notr="true">background-color: gray;</string>
+           </property>
+           <property name="text">
+            <string>保存</string>
+           </property>
+          </widget>
+         </item>
+        </layout>
+       </widget>
+      </item>
+      <item>
+       <widget class="QGraphicsView" name="graphicsView">
+        <property name="styleSheet">
+         <string notr="true">background-color: white;</string>
+        </property>
+       </widget>
+      </item>
+     </layout>
+    </widget>
+   </item>
+   <item>
+    <widget class="QLabel" name="posLabel">
+     <property name="text">
+      <string>coordinate</string>
+     </property>
+    </widget>
+   </item>
+   <item>
+    <layout class="QVBoxLayout" name="verticalLayout_3">
+     <item>
+      <widget class="QTextEdit" name="cmd_out">
+       <property name="styleSheet">
+        <string notr="true">QTextEdit {
+    background-color: rgba(255, 255, 255, 180); 
+    border: 2px solid lightgray;               
+    border-radius: 10px;                         
+    color: black;                               
+}
+</string>
+       </property>
+      </widget>
+     </item>
+    </layout>
+   </item>
+  </layout>
+ </widget>
+ <resources/>
+ <connections/>
+</ui>
