@@ -6,9 +6,9 @@ from PySide6.QtWidgets import (
     QColorDialog, QFileDialog, QCommandLinkButton
     )
 from PySide6.QtCore import Qt, Slot, QTimer
-from PySide6.QtGui import QPen, QBrush, QPainter, QImage, QKeyEvent, QPixmap
-from module import MyGraphicsView, CmdTextEdit, EmittingStr
-from tool import *
+from PySide6.QtGui import QPen, QBrush, QPainter, QImage, QKeyEvent, QPixmap, QColor
+from module import MyGraphicsView, RasterCanvas, CmdTextEdit, EmittingStr
+from tool import make_rect, calc_radius
 import sys
 
 class State(QMainWindow):
@@ -93,29 +93,20 @@ class State(QMainWindow):
         self.view.setDragMode(QGraphicsView.DragMode.NoDrag)
 
         # 获取按钮并绑定功能
-        self.ui.findChild(QToolButton, "point").clicked.connect(lambda: self.set_shape("点"))
-        self.ui.findChild(QToolButton, "line").clicked.connect(lambda: self.set_shape("直线"))
-        self.ui.findChild(QToolButton, "rectangle").clicked.connect(lambda: self.set_shape("矩形"))
-        self.ui.findChild(QToolButton, "ellipse").clicked.connect(lambda: self.set_shape("椭圆"))
-        self.ui.findChild(QToolButton, "circle").clicked.connect(lambda: self.set_shape("圆"))
-        self.ui.findChild(QToolButton, "move").clicked.connect(lambda: self.set_shape("移动"))
+        self.ui.findChild(QToolButton, "point").clicked.connect(lambda: self.set_mode("点"))
+        self.ui.findChild(QToolButton, "line").clicked.connect(lambda: self.set_mode("直线"))
+        self.ui.findChild(QToolButton, "rectangle").clicked.connect(lambda: self.set_mode("矩形"))
+        self.ui.findChild(QToolButton, "ellipse").clicked.connect(lambda: self.set_mode("椭圆"))
+        self.ui.findChild(QToolButton, "circle").clicked.connect(lambda: self.set_mode("圆"))
+        self.ui.findChild(QToolButton, "move").clicked.connect(lambda: self.set_mode("移动"))
         self.ui.findChild(QToolButton, "color_choose").clicked.connect(lambda: self.choose_color())
-        self.ui.findChild(QToolButton, "fill_toggle").clicked.connect(lambda: self.toggle_fill())
+        self.ui.findChild(QToolButton, "fill_toggle").clicked.connect(lambda: self.set_mode("填充"))
         self.ui.findChild(QToolButton, "save").clicked.connect(lambda: self.save_scene())
 
-        self.width = 800
-        self.height = 600
-        self.canvas = QImage(self.width, self.height, QImage.Format.Format_RGB32)
-        self.canvas.fill(Qt.GlobalColor.white)
-
-        self.canvas_item = self.scene.addPixmap(QPixmap.fromImage(self.canvas))
-
-    def append_output(self, text):
-        cursor = self.cmd_out.textCursor()
-        cursor.movePosition(QtGui.QTextCursor.MoveOperation.End)
-        cursor.insertText(text)
-        self.cmd_out.setTextCursor(cursor)
-        self.cmd_out.ensureCursorVisible()
+        # 像素画布
+        self.canvas_item = RasterCanvas(800, 600)
+        self.scene.addItem(self.canvas_item)
+        self.canvas = self.canvas_item
 
     def _update_label_position(self):
         """保持坐标标签在画布右下角"""
@@ -126,6 +117,13 @@ class State(QMainWindow):
             lw = self.pos_label.width()
             lh = self.pos_label.height()
             self.pos_label.move(w - lw - margin, h - lh - margin)
+
+    def append_output(self, text):
+        cursor = self.cmd_out.textCursor()
+        cursor.movePosition(QtGui.QTextCursor.MoveOperation.End)
+        cursor.insertText(text)
+        self.cmd_out.setTextCursor(cursor)
+        self.cmd_out.ensureCursorVisible()
 
     def click_enter(self):
         # 创建一个回车键的按下事件
@@ -139,25 +137,14 @@ class State(QMainWindow):
             self.pen_color = color
         print(f"当前颜色: {self.pen_color.name()}")
 
-    def toggle_fill(self):
-        self.fill = not self.fill
-        state = "开启" if self.fill else "关闭"
-        print(f"填充模式：{state}")
-
     def save_scene(self):
         file_path, _ = QFileDialog.getSaveFileName(self, "保存图形", "", "PNG Files (*.png);;JPEG Files (*.jpg)")
         if file_path:
-            # 使用 QImage + QPainter 渲染
-            rect = self.scene.itemsBoundingRect()
-            image = QImage(int(rect.width()), int(rect.height()), QImage.Format.Format_ARGB32)
-            image.fill(Qt.GlobalColor.white)
-            painter = QPainter(image)
-            self.scene.render(painter)
-            painter.end()
-            image.save(file_path)
+            self.canvas.save(file_path)
             print(f"图片已保存至{file_path}")
 
     def handle_command(self, cmd: str):
+        pass
         """解析并执行多行命令"""
         lines = cmd.splitlines()
         for line in lines:
@@ -190,9 +177,9 @@ class State(QMainWindow):
                 print(f"指令解析错误: {e}")
 
     @Slot()
-    def set_shape(self, shape_name):
+    def set_mode(self, shape_name):
         self.current_shape = shape_name
-        print(f"当前形状：{shape_name}")
+        print(f"当前模式：{shape_name}")
 
     @Slot()
     def mouse_press_event(self, event):
@@ -213,14 +200,17 @@ class State(QMainWindow):
                 else:
                     self.selected_item = None
                 return
-
             elif self.current_shape == "点":
                 self.scene.addEllipse(
                     self.start_pos.x(), self.start_pos.y(), 2, 2,
                     QPen(self.pen_color, self.pen_width),
                     QBrush(self.pen_color) if self.fill else QBrush(Qt.BrushStyle.NoBrush)
                 )
-                self.start_pos = None
+            elif self.current_shape == "填充":
+                print(f"在{self.start_pos}处进行填充")
+                self.canvas.fill_at_point(self.start_pos, self.pen_color)
+
+            self.start_pos = None
 
     @Slot()
     def mouse_move_event(self, event):
@@ -229,34 +219,34 @@ class State(QMainWindow):
         brush = QBrush(self.pen_color) if self.fill else QBrush(Qt.BrushStyle.NoBrush)
 
         # 实时更新鼠标坐标
-        scene_pos = end_pos
-        self.update_mouse_pos(scene_pos)
+        self.update_mouse_pos(end_pos)
 
         if self.current_shape == "移动" and hasattr(self, "selected_item") and self.selected_item:
-            dx = scene_pos.x() - self.last_mouse_pos.x()
-            dy = scene_pos.y() - self.last_mouse_pos.y()
+            dx = end_pos.x() - self.last_mouse_pos.x()
+            dy = end_pos.y() - self.last_mouse_pos.y()
             self.selected_item.moveBy(dx, dy)
-            self.last_mouse_pos = scene_pos
+            self.last_mouse_pos = end_pos
             return
 
         # 判断是否需要作图
         if self.start_pos and self.current_shape == "直线":
-            if hasattr(self, "temp_pixels"):
-                self.clear_temp_layer()  # 清空上次画的预览像素
-            draw_line_bresenham(self, self.start_pos.x(), self.start_pos.y(),
-                end_pos.x(), end_pos.y(), self.pen_color
-            )
-            self.refresh_canvas()
+            # 清空上一帧预览
+            self.canvas.clear_temp()
+
+            # scene 坐标 -> image 坐标
+            x0, y0 = self.canvas.scene_to_image(self.start_pos)
+            x1, y1 = self.canvas.scene_to_image(end_pos)
+
+            # 在 temp 层绘制预览线
+            self.canvas.draw_temp_line(x0, y0, x1, y1, self.pen_color)
+            # canvas.draw_temp_line 已经在内部调用 update_pixmap()
 
         if self.start_pos and self.current_shape == "椭圆":
-            # 删除临时圆
-            if hasattr(self, "temp_item") and self.temp_item:
-                self.scene.removeItem(self.temp_item)
+            # 清空上一帧预览
+            self.canvas.clear_temp()
 
-            # 使用addEllipse画椭圆，用到矩形框
-            p_start, p_end = self.start_pos, end_pos
-            rect = make_rect(p_start,p_end)
-            self.temp_item = self.scene.addEllipse(rect[0], rect[1], rect[2], rect[3], pen, brush)
+            # 在temp层画椭圆
+            self.canvas.draw_temp_ellipse(self.start_pos, end_pos, self.pen_color)
 
         if self.current_shape == "矩形":
             if self.start_pos and self.current_shape == "矩形":
@@ -268,31 +258,10 @@ class State(QMainWindow):
                 self.temp_item = self.scene.addRect(rect[0], rect[1], rect[2], rect[3], pen, brush)
 
         if self.start_pos and self.current_shape == "圆":
-            pen.setStyle(Qt.PenStyle.DashLine)  # 虚线
-            # 删除上一个临时圆
-            if self.temp_item:
-                self.scene.removeItem(self.temp_item)
+            self.canvas.clear_temp()
 
-            # 计算半径
-            dx = end_pos.x() - self.start_pos.x()
-            dy = end_pos.y() - self.start_pos.y()
-            radius = (dx ** 2 + dy ** 2) ** 0.5
-
-            # 更新半径标签
-            self.radius_label.setText(f"{radius:.1f}")
-            view_pos = self.view.mapFromScene(end_pos)
-            self.radius_label.move(view_pos.x() + 10, view_pos.y() + 10)
-            self.radius_label.show()
-
-            # 绘制临时圆
-            self.temp_item = self.scene.addEllipse(
-                self.start_pos.x() - radius,
-                self.start_pos.y() - radius,
-                radius * 2,
-                radius * 2,
-                pen,
-                QBrush(Qt.BrushStyle.NoBrush)  # 临时圆不填充
-            )
+            r = calc_radius(self.start_pos, end_pos)
+            self.canvas.draw_temp_circle(self.start_pos, r, self.pen_color)
 
     @Slot()
     def mouse_release_event(self, event):
@@ -314,49 +283,35 @@ class State(QMainWindow):
             self.temp_item = None
 
         if self.current_shape == "直线":
-            # 添加正式线条
-            draw_line_bresenham(self, self.start_pos.x(), self.start_pos.y(),
-                end_pos.x(), end_pos.y(), self.pen_color
-            )
-            self.refresh_canvas()
+            x0, y0 = self.canvas.scene_to_image(self.start_pos)
+            x1, y1 = self.canvas.scene_to_image(end_pos)
+
+            # 直接写入主图（会扩展并 update）
+            self.canvas.draw_line_to_image(x0, y0, x1, y1, self.pen_color)
+
+            # 清空临时层（若还残留）
+            self.canvas.clear_temp()
+            self.canvas.update_pixmap()
 
         if self.current_shape == "椭圆":
             # 添加正式椭圆
-            # 使用addEllipse画椭圆，用到矩形框
-            p_start, p_end = self.start_pos, end_pos
-            rect = make_rect(p_start,p_end)
-            self.scene.addEllipse(rect[0], rect[1], rect[2], rect[3], pen, brush)
+            self.canvas.draw_ellipse_to_image(self.start_pos, end_pos, self.pen_color)
+
+            self.canvas.clear_temp()
+            self.canvas.update_pixmap()
 
         if self.current_shape == "圆":
-            # 删除临时圆
-            if self.temp_item:
-                self.scene.removeItem(self.temp_item)
-                self.temp_item = None
+            r = calc_radius(self.start_pos, end_pos)
+            self.canvas.draw_circle_to_image(self.start_pos, r, self.pen_color)
 
-            self.radius_label.hide()  # 关闭半径显示
-
-            # 计算半径
-            dx = end_pos.x() - self.start_pos.x()
-            dy = end_pos.y() - self.start_pos.y()
-            radius = (dx ** 2 + dy ** 2) ** 0.5
-
-            # 添加正式圆
-            self.scene.addEllipse(
-                self.start_pos.x() - radius,
-                self.start_pos.y() - radius,
-                radius * 2,
-                radius * 2,
-                pen,
-                brush
-            )
-
-            self.start_pos = None
-            return
+            self.canvas.clear_temp()
+            self.canvas.update_pixmap()
 
         if self.current_shape == "矩形":
             p_start, p_end = self.start_pos, end_pos
             rect = make_rect(p_start, p_end)
             self.scene.addRect(rect[0], rect[1], rect[2], rect[3], pen, brush)
+
         self.start_pos = None
 
     def update_mouse_pos(self, scene_pos):
@@ -364,12 +319,9 @@ class State(QMainWindow):
         if self.pos_label:
             self.pos_label.setText(f"({scene_pos.x():.1f}, {scene_pos.y():.1f})")
 
-    def refresh_canvas(self):
-        """更新 QGraphicsScene 显示"""
-        self.canvas_item.setPixmap(QPixmap.fromImage(self.canvas))
-        self.scene.update()
-
     def clear_canvas(self):
-        self.canvas.fill(Qt.GlobalColor.white)
-        self.refresh_canvas()
+        """清空主画布"""
+        self.canvas.image.fill(Qt.white)
+        self.canvas.clear_temp()
+        self.canvas.update_pixmap()
 
