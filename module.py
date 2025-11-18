@@ -4,6 +4,8 @@ from PySide6 import QtCore
 from PySide6.QtCore import Qt, QPointF
 import re
 from VectorShape import *
+from tool import draw_line_bresenham
+
 """""
 class MyLoader(QUiLoader):
     def __init__(self, parent=None):
@@ -22,58 +24,107 @@ class MyGraphicsView(QGraphicsView):
         super().__init__(parent)
         self.parent_state = None
         self.setMouseTracking(True)  # 获取鼠标位置
-        self.scale_factor = 1.15  # 每次滚动的缩放倍数
-        self.min_scale = 0.2      # 最小缩放倍数
-        self.max_scale = 5.0      # 最大缩放倍数
-        self.current_scale = 1.0  # 当前缩放倍数
+        self.scale_factor = 1.15     # 每次滚动的缩放倍数
+        self.min_scale = 0.2         # 最小缩放倍数
+        self.max_scale = 5.0         # 最大缩放倍数
+        self.current_scale = 1.0     # 当前缩放倍数
+        self._pan_active = False     # 是否正在平移视图
+        self._last_mouse_pos = None  # 平移的上次鼠标位置
+
         # 以鼠标为中心进行缩放
         self.setTransformationAnchor(QGraphicsView.ViewportAnchor.AnchorUnderMouse)
         self.setResizeAnchor(QGraphicsView.ViewportAnchor.AnchorUnderMouse)
+
         # 平滑缩放
         self.setRenderHint(QPainter.Antialiasing, True)
         self.setRenderHint(QPainter.SmoothPixmapTransform, True)
         self.setRenderHint(QPainter.TextAntialiasing, True)
 
     def mousePressEvent(self, event):
-        if self.parent_state:
+        if self.parent_state and self.parent_state.current_mode == "平移" and event.button() == Qt.MouseButton.LeftButton:
+            self._pan_active = True
+            self._last_mouse_pos = event.position()
+            self.setCursor(Qt.CursorShape.ClosedHandCursor)
+        elif event.button() == Qt.MouseButton.MiddleButton:
+            self._pan_active = True
+            self._last_mouse_pos = event.position()
+            self.setCursor(Qt.CursorShape.ClosedHandCursor)
+        elif self.parent_state:
             self.parent_state.mouse_press_event(event)
         super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event):
-        if self.parent_state:
+        if self._pan_active and self._last_mouse_pos:
+            delta = event.position() - self._last_mouse_pos
+            self._last_mouse_pos = event.position()
+
+            # 反向更新滚动条实现平移
+            hbar, vbar = self.horizontalScrollBar(), self.verticalScrollBar()
+            hbar.setValue(hbar.value() - delta.x())
+            vbar.setValue(vbar.value() - delta.y())
+        elif self.parent_state:
             scene_pos = self.mapToScene(event.position().toPoint())
             self.parent_state.update_mouse_pos(scene_pos)
             self.parent_state.mouse_move_event(event)
+
         super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event):
-        if self.parent_state:
+        if self._pan_active:
+            self._pan_active = False
+            self._last_mouse_pos = None
+            self.setCursor(Qt.CursorShape.ArrowCursor)
+        elif self.parent_state:
             self.parent_state.mouse_release_event(event)
         super().mouseReleaseEvent(event)
 
     def wheelEvent(self, event: QWheelEvent):
-        """支持 Ctrl + 滚轮 缩放视图"""
         if event.modifiers() & Qt.KeyboardModifier.ControlModifier:
-            # 判断滚轮方向
-            if event.angleDelta().y() > 0:
-                factor = self.scale_factor
-            else:
-                factor = 1 / self.scale_factor
+            factor = self.scale_factor if event.angleDelta().y() > 0 else 1 / self.scale_factor
 
-            # 更新缩放值
+            if self.parent_state is None:
+                super().wheelEvent(event)
+                return
+
+            canvas = self.parent_state.canvas
+            view_size = self.viewport().size()
+
+            # 计算缩放后的比例
             new_scale = self.current_scale * factor
-            if self.min_scale <= new_scale <= self.max_scale:
-                self.scale(factor, factor)
-                self.current_scale = new_scale
+
+            # 最小缩放：不能比 view 小
+            min_scale_w = view_size.width() / canvas.image.width()
+            min_scale_h = view_size.height() / canvas.image.height()
+            min_scale = min(min_scale_w, min_scale_h)
+
+            # 最大缩放：固定值，例如 5
+            max_scale = 5.0
+
+            # 限制 new_scale
+            if new_scale < min_scale:
+                factor = min_scale / self.current_scale
+                new_scale = min_scale
+            elif new_scale > max_scale:
+                factor = max_scale / self.current_scale
+                new_scale = max_scale
+
+            # 应用缩放
+            self.scale(factor, factor)
+            self.current_scale = new_scale
             event.accept()
         else:
-            # 没按 Ctrl 时执行默认行为（比如滚动视图）
             super().wheelEvent(event)
+
+    def fit_scene_to_view(self):
+        if self.scene() is None:
+            return
+        self.fitInView(self.scene().sceneRect(), Qt.AspectRatioMode.KeepAspectRatio)
+        self.current_scale = 1.0
 
 class RasterCanvas(QGraphicsPixmapItem):
     """像素画布 + 临时层（预览），支持自动扩展 & 合并显示"""
 
-    def __init__(self, width=800, height=600, bg_color=Qt.white):
+    def __init__(self, width=800, height=600, bg_color=QColor('white')):
         super().__init__()
         # 主图和临时层都用 ARGB32（方便合成透明）
         self.image = QImage(width, height, QImage.Format.Format_ARGB32)
@@ -123,183 +174,297 @@ class RasterCanvas(QGraphicsPixmapItem):
         iy = int(round(sy - self.pos().y()))
         return ix, iy
 
-    def ensure_contains(self, *points: QPointF):
-        """
-        确保 image 和 temp 层包含给定的所有 QPointF。
-        返回 (x_offset, y_offset) —— 旧图在新图中的偏移（用于重算坐标）。
-        """
-        if not points:
-            return 0, 0
-
-        xs = [int(round(p.x())) for p in points]
-        ys = [int(round(p.y())) for p in points]
-
-        ix_min, iy_min = min(xs), min(ys)
-        ix_max, iy_max = max(xs), max(ys)
-
-        # 检查是否完全在当前 image 范围内
-        if 0 <= ix_min < self.image.width() and 0 <= iy_min < self.image.height() and \
-                0 <= ix_max < self.image.width() and 0 <= iy_max < self.image.height():
-            return 0, 0
-
-        # 需要扩容
-        left = min(0, ix_min)
-        top = min(0, iy_min)
-        right = max(self.image.width() - 1, ix_max)
-        bottom = max(self.image.height() - 1, iy_max)
-
-        new_w = right - left + 1
-        new_h = bottom - top + 1
-        x_off = -left
-        y_off = -top
-
-        # 新 image & temp
-        new_img = QImage(new_w, new_h, QImage.Format.Format_ARGB32)
-        new_img.fill(self.bg_color)
-        new_temp = QImage(new_w, new_h, QImage.Format.Format_ARGB32)
-        new_temp.fill(Qt.transparent)
-
-        # 复制旧图
-        p = QPainter(new_img)
-        p.drawImage(x_off, y_off, self.image)
-        p.end()
-        p = QPainter(new_temp)
-        p.drawImage(x_off, y_off, self.temp)
-        p.end()
-
-        # 更新
-        self.image = new_img
-        self.temp = new_temp
-        self.offset_x += x_off
-        self.offset_y += y_off
-
-        # 更新 pixmap 和 scene 位置
-        self.setPixmap(QPixmap.fromImage(self.combined_image()))
-        self.setPos(left, top)
-        return x_off, y_off
-
     # ---------- 临时层操作接口 ----------
     def clear_temp(self):
         self.temp.fill(Qt.GlobalColor.transparent)
 
     # ---------- 将临时层合并到主图 ----------
-    def commit_temp_to_image(self):
-        painter = QPainter(self.image)
-        painter.drawImage(0, 0, self.temp)
-        painter.end()
-        # 清空 temp 并刷新显示
+    def redraw(self):
+        # 清空 image
+        self.image.fill(self.bg_color)
+        # 绘制存储在 self.shapes 的每个 shape（它们应记录 image 坐标和当前 angle）
+        for shape in self.shapes:
+            if shape.type == 'Line':
+                for x0, y0, x1, y1 in shape.get_line():
+                    from tool import draw_line_bresenham
+                    draw_line_bresenham(self.image, x0, y0, x1, y1, shape.border_color, shape.line_style)
+            elif shape.type == 'Polygon':
+                self.draw_polygon(shape, "image")
+            elif shape.type == 'Ellipse':
+                # 此处 draw_ellipse 不会再 append shapes
+                self.draw_ellipse(shape, "image")
+            elif shape.type == 'Circle':
+                from tool import draw_circle_midpoint
+                draw_circle_midpoint(self.image, shape.centre, shape.radius, shape.border_color, shape.line_style)
+                self._fill_shape(shape, shape.fill_color)
+        # 确保 temp 清空（提交到 image 后通常希望清空）
         self.clear_temp()
         self.update_pixmap()
 
-    def draw_temp_line(self, x0, y0, x1, y1, color):
-        # 一次性确保两个端点都在范围内
-        ox, oy = self.ensure_contains(QPointF(x0, y0), QPointF(x1, y1))
-        nx0 = x0 + ox
-        ny0 = y0 + oy
-        nx1 = x1 + ox
-        ny1 = y1 + oy
 
+# TODO:将线段作画的参数换为QPointF
+    def draw_temp_line(self, x0, y0, x1, y1, color, line_style):
+        self.clear_temp()
         # 绘制到 temp
         from tool import draw_line_bresenham
-        draw_line_bresenham(self.temp, nx0, ny0, nx1, ny1, color)
+        draw_line_bresenham(self.temp, x0, y0, x1, y1, color, line_style)
 
         # 更新显示
         self.update_pixmap()
 
-    # --------- 在临时层绘制椭圆 -----------
-    def draw_temp_ellipse(self, p1, p2, color):
-        # 提取坐标
-        x0, y0 = p1.x(), p1.y()
-        x1, y1 = p2.x(), p2.y()
-
-        # 确保端点在范围内，并计算偏移
-        ox, oy = self.ensure_contains(p1, p2)
-        nx0 = x0 + ox
-        ny0 = y0 + oy
-        nx1 = x1 + ox
-        ny1 = y1 + oy
-
-        # 调用工具函数绘制椭圆
-        from tool import draw_ellipse_midpoint
-        draw_ellipse_midpoint(self.temp, QPointF(nx0, ny0), QPointF(nx1, ny1), color)
-
-        # 刷新显示（不立即清除 temp）
-        self.update_pixmap()
-
+# TODO:像椭圆和多边形一样将圆的temp层和image层整合
     # --------- 在临时层绘制圆 -----------
-    def draw_temp_circle(self, centre, r, color):
-        xc, yc = centre.x(), centre.y()
-        ox, oy = self.ensure_contains(centre)
-
-        nxc, nyc = xc + ox, yc + oy
-
+    def draw_temp_circle(self, centre, r, color, line_style):
+        self.clear_temp()
         # 调用工具函数绘制椭圆
         from tool import draw_circle_midpoint
-        draw_circle_midpoint(self.temp, QPointF(nxc, nyc), r, color)
+        draw_circle_midpoint(self.temp, centre, r, color, line_style)
 
         # 刷新显示（不立即清除 temp）
         self.update_pixmap()
 
-    # ---------- 直接在主图绘制（用于最终 commit） ----------
-    def draw_line_to_image(self, x0, y0, x1, y1, color):
-        ox, oy = self.ensure_contains(QPointF(x0, y0), QPointF(x1, y1))
-        nx0 = x0 + ox
-        ny0 = y0 + oy
-        nx1 = x1 + ox
-        ny1 = y1 + oy
-
-        self.shapes.append(LineShape(QPointF(x0,y0), QPointF(x1,y1), color))
+    # ---------- 主图绘制 ----------
+    def draw_line_to_image(self, x0, y0, x1, y1, color, line_style):
+        self.clear_temp()
+        self.shapes.append(LineShape(QPointF(x0,y0), QPointF(x1,y1), color, line_style))
         from tool import draw_line_bresenham
-        draw_line_bresenham(self.image, nx0, ny0, nx1, ny1, color)
+        draw_line_bresenham(self.image, x0, y0, x1, y1, color, line_style)
         self.update_pixmap()
 
-    # ---------- 直接在主图绘制（用于最终 commit） ----------
-    def draw_circle_to_image(self, centre, r, color):
-        xc, yc = centre.x(), centre.y()
-        ox, oy = self.ensure_contains(centre)
-
-        nxc, nyc = xc+ox, yc+oy
-        nc = QPointF(nxc,nyc)
-        self.shapes.append(CircleShape(centre, r, color, None))
+    def draw_circle_to_image(self, centre, r, color, line_style):
+        self.clear_temp()
+        self.shapes.append(CircleShape(centre, r, color, None, line_style))
         from tool import draw_circle_midpoint
-        draw_circle_midpoint(self.image, nc, r, color)
+        draw_circle_midpoint(self.image, centre, r, color, line_style)
         self.update_pixmap()
 
-    # --------- 在主图绘制椭圆 -----------
-    def draw_ellipse_to_image(self, p1, p2, color):
-        x0, y0 = p1.x(), p1.y()
-        x1, y1 = p2.x(), p2.y()
+    def draw_polygon(self, polygon: PolygonShape, target: str):
+        """
+        绘制多边形（含填充 + 边界）。
+        target: "image" 或 "temp"
+        """
 
-        # 确保端点在范围内，并计算偏移
-        ox, oy = self.ensure_contains(p1, p2)
-        nx0, ny0 = x0 + ox, y0 + oy
-        nx1, ny1 = x1 + ox, y1 + oy
-        np1 = QPointF(nx0,ny0)
-        np2 = QPointF(nx1,ny1)
-        self.shapes.append(EllipseShape(p1, p2, color, None))
-        from tool import draw_ellipse_midpoint
-        draw_ellipse_midpoint(self.image, np1, np2, color)
+        # --- 选择绘制目标 ---
+        if target == "temp":
+            self.clear_temp()
+            target_img = self.temp
+        else:
+            target_img = self.image
+
+        points = polygon.points
+        n = len(points)
+        if n < 2:
+            return
+
+        W, H = target_img.width(), target_img.height()
+
+        # 1. 填充：扫描线多边形填充
+        if polygon.fill_color is not None:
+            # 先构建边表（Edge Table）
+            edges = []
+            for i in range(n):
+                p1 = points[i]
+                p2 = points[(i + 1) % n]
+
+                x1, y1 = p1.x(), p1.y()
+                x2, y2 = p2.x(), p2.y()
+
+                # 跳过水平边
+                if y1 == y2:
+                    continue
+
+                # 保证 y1 < y2
+                if y1 > y2:
+                    x1, x2 = x2, x1
+                    y1, y2 = y2, y1
+
+                # (ymin, ymax, x_at_ymin, dx/dy)
+                edges.append([y1, y2, x1, (x2 - x1) / (y2 - y1)])
+
+            # 扫描线从图像区域内扫描
+            for y in range(H):
+                # AL (Active List)
+                active = []
+
+                for ymin, ymax, x_at_ymin, slope in edges:
+                    if ymin <= y < ymax:  # 在有效扫描范围
+                        x = x_at_ymin + (y - ymin) * slope
+                        active.append(x)
+
+                if not active:
+                    continue
+
+                active.sort()
+
+                # 成对填充
+                for i in range(0, len(active), 2):
+                    x_start = int(active[i])
+                    x_end = int(active[i + 1])
+
+                    if x_end < x_start:
+                        continue
+
+                    for x in range(x_start, x_end + 1):
+                        if 0 <= x < W and 0 <= y < H:
+                            target_img.setPixelColor(x, y, polygon.fill_color)
+
+        # 2. 描边：Bresenham 画边
+        for i in range(n):
+            p1 = points[i]
+            p2 = points[(i + 1) % n]
+
+            x1, y1 = int(round(p1.x())), int(round(p1.y()))
+            x2, y2 = int(round(p2.x())), int(round(p2.y()))
+
+            draw_line_bresenham(
+                target_img,
+                x1, y1,
+                x2, y2,
+                polygon.border_color,
+                polygon.line_style
+            )
+        if target == "temp":
+            self.update_pixmap()
+
+    def draw_polygon_points(self, points: list[QPointF], color: QColor):
+        """
+        绘制多边形边界（可用于临时显示悬浮边）。
+        points: 点列表，可以是 PolygonShape.points 或临时加上鼠标点
+        target: 'temp' 或 'image'
+        color: 边界颜色
+        """
+        if not points or len(points) < 2:
+            return  # 至少需要两点才能画边
+        self.clear_temp()
+        target_img = self.temp
+
+        W, H = target_img.width(), target_img.height()
+
+        # 遍历每条边绘制（最后一个点到第一个点可以不画，悬浮边时不要闭合）
+        for i in range(len(points)-1):
+            p1 = points[i]
+            p2 = points[i + 1]
+
+            x0, y0 = int(round(p1.x())), int(round(p1.y()))
+            x1, y1 = int(round(p2.x())), int(round(p2.y()))
+
+            # 使用 Bresenham 算法绘制直线
+            dx = abs(x1 - x0)
+            dy = abs(y1 - y0)
+            sx = 1 if x0 < x1 else -1
+            sy = 1 if y0 < y1 else -1
+            err = dx - dy
+
+            while True:
+                if 0 <= x0 < W and 0 <= y0 < H:
+                    target_img.setPixelColor(x0, y0, color)
+
+                if x0 == x1 and y0 == y1:
+                    break
+                e2 = 2 * err
+                if e2 > -dy:
+                    err -= dy
+                    x0 += sx
+                if e2 < dx:
+                    err += dx
+                    y0 += sy
+
+        self.update_pixmap()
+
+    def draw_ellipse(self, ellipse: EllipseShape, target: str):
+        """
+        Draw ellipse to either 'temp' or 'image'. 只绘制，不修改 self.shapes。
+        """
+        self.clear_temp()
+
+        cx, cy = ellipse.centre.x(), ellipse.centre.y()
+        a = max(int(ellipse.a), 1)
+        b = max(int(ellipse.b), 1)
+        angle = ellipse.angle
+
+        target_img = self.image if target == "image" else self.temp
+        W, H = target_img.width(), target_img.height()
+
+        if angle == 0.0:
+            from tool import draw_ellipse_midpoint
+            p1 = QPointF(cx - a, cy - b)
+            p2 = QPointF(cx + a, cy + b)
+            draw_ellipse_midpoint(target_img, p1, p2, ellipse.border_color, ellipse.line_style)
+            if target == "temp":
+                self.update_pixmap()
+            return
+
+        # 旋转情况：用 parametric/采样法绘制边界（及可选填充）
+        import math
+        cosA = math.cos(math.radians(angle))
+        sinA = math.sin(math.radians(angle))
+
+        # 绘制边界（parametric），steps 与周长成比例
+        steps = max(24, int(2 * math.pi * max(a, b)))  # 保守下限防止过小
+        dash_len = 6
+
+        # 如果需要填充，先做射线/扫描或保守采样（这里只做边界 + 可选简单内填）
+        # 先画 fill（如果有），使用点采样 + 点在旋转椭圆测试
+        if ellipse.fill_color is not None:
+            # 旋转后的椭圆包围矩形
+            dx = (a * a * cosA ** 2 + b * b * sinA ** 2) ** 0.5
+            dy = (a * a * sinA ** 2 + b * b * cosA ** 2) ** 0.5
+
+            x_min = max(int(cx - dx), 0)
+            x_max = min(int(cx + dx), W - 1)
+            y_min = max(int(cy - dy), 0)
+            y_max = min(int(cy + dy), H - 1)
+
+            for iy in range(y_min, y_max + 1):
+                for ix in range(x_min, x_max + 1):
+                    # 相对椭圆中心
+                    rx = ix - cx
+                    ry = iy - cy
+                    # 反旋转到未旋转坐标系
+                    x_un = rx * cosA + ry * sinA
+                    y_un = -rx * sinA + ry * cosA
+                    # 判断是否在椭圆内部
+                    if (x_un * x_un) / (a * a) + (y_un * y_un) / (b * b) <= 1.0:
+                        target_img.setPixelColor(ix, iy, ellipse.fill_color)
+
+        # 再画边界（parametric），dash 支持
+        dash_counter = 0
+        for i in range(steps):
+            t = 2 * math.pi * i / steps
+            x0 = a * math.cos(t)
+            y0 = b * math.sin(t)
+            # 旋转并平移
+            x = cx + x0 * cosA - y0 * sinA
+            y = cy + x0 * sinA + y0 * cosA
+            xi, yi = int(round(x)), int(round(y))
+            if 0 <= xi < W and 0 <= yi < H:
+                if ellipse.line_style == 'solid':
+                    target_img.setPixelColor(xi, yi, ellipse.border_color)
+                else:
+                    # dash pattern: 每 dash_len 像素绘制一段
+                    if (dash_counter // dash_len) % 2 == 0:
+                        target_img.setPixelColor(xi, yi, ellipse.border_color)
+                    dash_counter += 1
+
         self.update_pixmap()
 
 
     # ----------- 扫描线填充算法 --------------
     # State调用fill_at_point来根据用户点击位置进行填充
     def fill_at_point(self, click_point: QPointF, fill_color):
-        # Scene 坐标 -> Image 坐标
-        ix, iy = self.scene_to_image(click_point)
-        click_in_image = QPointF(ix, iy)
-
-        print("执行向量图搜索")
-        for shape in reversed(self.shapes):
-            if shape.contains(click_in_image):
-                self._fill_shape(shape, fill_color)
-                print(f"{shape.type}")
-                break
+        shape = self.find_shape_at_image_point(click_point)
+        self._fill_shape(shape, fill_color)
 
     # 扫描线填充算法核心
     def _fill_shape(self, shape: VectorShape, fill_color):
         if isinstance(fill_color, Qt.GlobalColor):
             fill_color = QColor(fill_color)
+
+        if fill_color is None:
+            return
+        if shape.type == "Line":
+            print("线段不应当被填充")
+            return
 
         shape.fill_color = fill_color
 
@@ -365,90 +530,109 @@ class RasterCanvas(QGraphicsPixmapItem):
                         if 0 <= x < self.image.width() and 0 <= y < self.image.height():
                             self.image.setPixelColor(x, y, fill_color)
             elif shape.type == 'Ellipse':
+                from math import cos, sin, radians
                 cx = shape.centre.x() + ox
                 cy = shape.centre.y() + oy
-
                 a, b = shape.a, shape.b
                 a2, b2 = a * a, b * b
+                angle = getattr(shape, 'angle', 0.0)  # 旋转角度，度
+                cosA = cos(radians(-angle))  # 反旋转
+                sinA = sin(radians(-angle))
                 H, W = self.image.height(), self.image.width()
 
-                # 扫描 y
-                for iy in range(int(cy - b), int(cy + b) + 1):
-                    if iy < 0 or iy >= H:
-                        continue
+                # 旋转椭圆的包围矩形
+                dx = (a2 * cosA ** 2 + b2 * sinA ** 2) ** 0.5
+                dy = (a2 * sinA ** 2 + b2 * cosA ** 2) ** 0.5
 
-                    dy = iy - cy
+                x_min = max(int(cx - dx), 0)
+                x_max = min(int(cx + dx), W - 1)
+                y_min = max(int(cy - dy), 0)
+                y_max = min(int(cy + dy), H - 1)
 
-                    # 类似圆: part = a²b² - a²*dy²
-                    part = a2 * b2 - a2 * dy * dy
-                    if part < 0:
-                        continue  # 浮点保护
-
-                    dx = (part / b2) ** 0.5
-
-                    x_start = int(cx - dx + 1e-9)
-                    x_end = int(cx + dx + 1e-9)
-
-                    # 填充线段
-                    for ix in range(x_start, x_end + 1):
-                        if 0 <= ix < W:
+                for iy in range(y_min, y_max + 1):
+                    for ix in range(x_min, x_max + 1):
+                        # 相对椭圆中心
+                        x_rel = ix - cx
+                        y_rel = iy - cy
+                        # 反旋转到未旋转坐标系
+                        x_un = x_rel * cosA - y_rel * sinA
+                        y_un = x_rel * sinA + y_rel * cosA
+                        # 判断椭圆内部
+                        if (x_un * x_un) / a2 + (y_un * y_un) / b2 <= 1.0:
                             self.image.setPixelColor(ix, iy, fill_color)
 
         self.update_pixmap()
 
+    # ---------- 旋转 ------------
+    def rotate(self, delta_angle: float, shape: VectorShape):
+        self._rotate_shape(delta_angle, shape)
+
+    def _rotate_shape(self, delta_angle: float, shape: VectorShape):
+        shape.rotate(delta_angle)
+        self._draw_shape_to_temp(shape)
+
+    #------- 拖放 --------
+    def drag_and_drop(self, dx, dy, shape: VectorShape):
+        self._drag_and_drop_shape(dx, dy, shape)
+
+    def _drag_and_drop_shape(self, dx, dy, shape: VectorShape):
+        shape.drag_and_drop(dx, dy)
+        self._draw_shape_to_temp(shape)
 
     # ---------- 选择与变换工具 ----------
-    def find_shape_at_image_point(self, ix, iy):
-        """返回最顶层（最后 append）的 shape 或 None； ix,iy 是 image 坐标"""
-        p = QPointF(ix, iy)
+    def find_shape_at_image_point(self, point):
+        # Scene 坐标 -> Image 坐标
+        ix, iy = self.scene_to_image(point)
+        point_in_image = QPointF(ix, iy)
+
         for shape in reversed(self.shapes):
-            # 只有填充/边界某些形可被选中，可根据需求也允许选择边线
-            try:
-                if shape.contains(p):
-                    return shape
-            except Exception:
-                continue
-        return None
+            if shape.contains(point_in_image):
+                return shape
 
-    def translate_shape(self, shape: VectorShape, dx, dy):
-        """把 shape 在 image 坐标系中移动（立即生效到 image 或 temp，取决场景）"""
-        shape.translate(dx, dy)
-        # 立即重绘受影响区域：简单起见，重画全部（或优化为局部）
-        self.redraw_all_shapes()
+    def _draw_shape_to_temp(self, shape: VectorShape):
+        # 根据 shape 类型绘制到 temp 层
+        if shape.type == 'Line':
+            for x0, y0, x1, y1 in shape.get_line():
+                self.draw_temp_line(x0, y0, x1, y1, shape.border_color, shape.line_style)
 
-    def rotate_shape(self, shape: VectorShape, angle_deg, center=None):
-        shape.rotate(angle_deg, center)
-        self.redraw_all_shapes()
+        elif shape.type == 'Polygon':
+            self.draw_polygon(shape, 'temp')
 
-    def redraw_all_shapes(self):
-        """使用 shapes 的矢量信息重绘 self.image（保持 offset 不变）"""
-        # 清空 image（保留 bg）
-        w,h = self.image.width(), self.image.height()
-        self.image.fill(self.bg_color)
-        # 逐个绘制 shape 的边界与填充（注意：绘制边界时使用边界像素方法）
-        from tool import draw_line_bresenham, draw_circle_midpoint, draw_ellipse_midpoint
-        for shape in self.shapes:
-            if shape.type == 'Line':
-                (x1,y1,x2,y2) = shape.get_line()[0]
-                # 用偏移量 ox/oy already included in shapes if shapes store image coords,
-                # else add self.offset_x/self.offset_y
-                draw_line_bresenham(self.image, int(x1), int(y1), int(x2), int(y2), shape.border_color)
-            elif shape.type == 'Circle':
-                cx = int(round(shape.centre.x()))
-                cy = int(round(shape.centre.y()))
-                draw_circle_midpoint(self.image, QPointF(cx,cy), shape.radius, shape.border_color)
-            elif shape.type == 'Ellipse':
-                p1 = QPointF(shape.centre.x()-shape.a, shape.centre.y()-shape.b)
-                p2 = QPointF(shape.centre.x()+shape.a, shape.centre.y()+shape.b)
-                draw_ellipse_midpoint(self.image, p1, p2, shape.border_color)
-            elif shape.type == 'Polygon':
-                # draw polygon edges
-                edges = shape.get_edges()
-                for x1,y1,x2,y2 in edges:
-                    draw_line_bresenham(self.image, int(round(x1)), int(round(y1)), int(round(x2)), int(round(y2)), shape.border_color)
-            # 填充如果 shape.fill_color 非空可以执行你已有 _fill_shape 的填充逻辑（或延后）
+        elif shape.type == 'Ellipse':
+            # 旋转后的椭圆暂时用中心点 + a,b + angle绘制
+            self.draw_ellipse(shape, 'temp')
+
+        elif shape.type == 'Circle':
+            # 旋转对圆无影响
+            self.draw_temp_circle(shape.centre, shape.radius, shape.border_color, shape.line_style)
+
         # 刷新显示
         self.update_pixmap()
+
+    def save(self, path: str):
+        """
+        保存画布内容（包括 temp 层）到文件
+        """
+        if not hasattr(self, 'image'):
+            print("没有 image 属性，无法保存")
+            return False
+
+        # 合并 image 和 temp
+        combined = self.image.copy()
+        painter = QPainter(combined)
+        if hasattr(self, 'temp'):
+            painter.drawImage(0, 0, self.temp)
+        painter.end()
+
+        # 自动添加后缀
+        if not path.lower().endswith((".png", ".jpg", ".jpeg")):
+            path += ".png"
+
+        success = combined.save(path)
+        if not success:
+            print(f"保存失败: {path}")
+        return success
+
 
 
 # 辅助类，将Python的print结果重新定向到Qt控件

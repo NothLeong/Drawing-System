@@ -6,8 +6,8 @@
    <rect>
     <x>0</x>
     <y>0</y>
-    <width>528</width>
-    <height>594</height>
+    <width>699</width>
+    <height>639</height>
    </rect>
   </property>
   <property name="windowTitle">
@@ -17,10 +17,12 @@
    <number>4</number>
   </property>
   <property name="styleSheet">
-   <string notr="true">background-color: lightgray;</string>
+   <string notr="true">QDialog#Drawing {
+    background-color: lightgray;
+}</string>
   </property>
   <layout class="QVBoxLayout" name="verticalLayout_2">
-   <item alignment="Qt::AlignLeft|Qt::AlignTop">
+   <item alignment="Qt::AlignmentFlag::AlignLeft|Qt::AlignmentFlag::AlignTop">
     <widget class="QFrame" name="horizontalFrame">
      <property name="minimumSize">
       <size>
@@ -34,7 +36,20 @@
        <height>50</height>
       </size>
      </property>
-     <layout class="QHBoxLayout" name="horizontalLayout" stretch="0,0">
+     <layout class="QHBoxLayout" name="horizontalLayout" stretch="0,0,0">
+      <item>
+       <spacer name="horizontalSpacer">
+        <property name="orientation">
+         <enum>Qt::Orientation::Horizontal</enum>
+        </property>
+        <property name="sizeHint" stdset="0">
+         <size>
+          <width>40</width>
+          <height>20</height>
+         </size>
+        </property>
+       </spacer>
+      </item>
       <item>
        <widget class="QTextEdit" name="cmd_in">
         <property name="minimumSize">
@@ -44,7 +59,7 @@
          </size>
         </property>
         <property name="styleSheet">
-         <string notr="true">background-color: white;</string>
+         <string notr="true"/>
         </property>
        </widget>
       </item>
@@ -81,19 +96,37 @@
        <height>350</height>
       </size>
      </property>
+     <property name="styleSheet">
+      <string notr="true"/>
+     </property>
      <layout class="QHBoxLayout" name="horizontalLayout_2">
       <item>
        <widget class="QWidget" name="toolbox" native="true">
         <property name="layoutDirection">
-         <enum>Qt::LeftToRight</enum>
+         <enum>Qt::LayoutDirection::LeftToRight</enum>
         </property>
         <property name="styleSheet">
-         <string notr="true">background-color: rgb(243, 237, 220);</string>
+         <string notr="true">QWidget#toolbox {
+    background-color: rgb(243, 237, 220);
+}</string>
         </property>
         <layout class="QVBoxLayout" name="verticalLayout">
          <property name="sizeConstraint">
-          <enum>QLayout::SetDefaultConstraint</enum>
+          <enum>QLayout::SizeConstraint::SetDefaultConstraint</enum>
          </property>
+         <item>
+          <widget class="QCheckBox" name="toggle_dash">
+           <property name="styleSheet">
+            <string notr="true">QCheckBox::indicator {
+    width: 16px;
+    height: 16px;
+}</string>
+           </property>
+           <property name="text">
+            <string>虚线</string>
+           </property>
+          </widget>
+         </item>
          <item>
           <widget class="QToolButton" name="point">
            <property name="styleSheet">
@@ -115,19 +148,19 @@
           </widget>
          </item>
          <item>
-          <widget class="QToolButton" name="rectangle">
+          <widget class="QToolButton" name="polygon">
            <property name="styleSheet">
             <string notr="true">background-color: gray;</string>
            </property>
            <property name="text">
-            <string>矩形</string>
+            <string>多边形</string>
            </property>
           </widget>
          </item>
          <item>
           <widget class="QToolButton" name="ellipse">
            <property name="layoutDirection">
-            <enum>Qt::LeftToRight</enum>
+            <enum>Qt::LayoutDirection::LeftToRight</enum>
            </property>
            <property name="styleSheet">
             <string notr="true">background-color: gray;</string>
@@ -148,12 +181,32 @@
           </widget>
          </item>
          <item>
+          <widget class="QToolButton" name="drag_and_drop">
+           <property name="styleSheet">
+            <string notr="true">background-color: gray;</string>
+           </property>
+           <property name="text">
+            <string>拖放</string>
+           </property>
+          </widget>
+         </item>
+         <item>
           <widget class="QToolButton" name="move">
            <property name="styleSheet">
             <string notr="true">background-color: gray;</string>
            </property>
            <property name="text">
-            <string>移动</string>
+            <string>平移</string>
+           </property>
+          </widget>
+         </item>
+         <item>
+          <widget class="QToolButton" name="rotate">
+           <property name="styleSheet">
+            <string notr="true">background-color: gray;</string>
+           </property>
+           <property name="text">
+            <string>旋转</string>
            </property>
           </widget>
          </item>
@@ -192,6 +245,18 @@
       </item>
       <item>
        <widget class="QGraphicsView" name="graphicsView">
+        <property name="minimumSize">
+         <size>
+          <width>449</width>
+          <height>332</height>
+         </size>
+        </property>
+        <property name="maximumSize">
+         <size>
+          <width>1280</width>
+          <height>720</height>
+         </size>
+        </property>
         <property name="styleSheet">
          <string notr="true">background-color: white;</string>
         </property>
