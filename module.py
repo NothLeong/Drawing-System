@@ -335,47 +335,36 @@ class RasterCanvas(QGraphicsPixmapItem):
 
         self.update_pixmap()
 
-    def draw_polygon_points(self, points: list[QPointF], color: QColor):
+    def draw_polygon_points(self, points: list[QPointF], color: QColor, line_style: str = 'dash'):
         """
         绘制多边形边界（可用于临时显示悬浮边）。
-        points: 点列表，可以是 PolygonShape.points 或临时加上鼠标点
-        target: 'temp' 或 'image'
+        points: 点列表
         color: 边界颜色
+        line_style: 线型 ('solid' 或 'dash')
         """
         if not points or len(points) < 2:
-            return  # 至少需要两点才能画边
+            return
+
         target_img = self.temp
 
-        W, H = target_img.width(), target_img.height()
+        # 引入已有的 Bresenham 算法
+        from tool import draw_line_bresenham
 
-        # 遍历每条边绘制（最后一个点到第一个点可以不画，悬浮边时不要闭合）
-        for i in range(len(points)-1):
+        # 遍历每条边，直接调用算法绘制
+        for i in range(len(points) - 1):
             p1 = points[i]
             p2 = points[i + 1]
 
             x0, y0 = int(round(p1.x())), int(round(p1.y()))
             x1, y1 = int(round(p2.x())), int(round(p2.y()))
 
-            # 使用 Bresenham 算法绘制直线
-            dx = abs(x1 - x0)
-            dy = abs(y1 - y0)
-            sx = 1 if x0 < x1 else -1
-            sy = 1 if y0 < y1 else -1
-            err = dx - dy
-
-            while True:
-                if 0 <= x0 < W and 0 <= y0 < H:
-                    target_img.setPixelColor(x0, y0, color)
-
-                if x0 == x1 and y0 == y1:
-                    break
-                e2 = 2 * err
-                if e2 > -dy:
-                    err -= dy
-                    x0 += sx
-                if e2 < dx:
-                    err += dx
-                    y0 += sy
+            draw_line_bresenham(
+                target_img,
+                x0, y0,
+                x1, y1,
+                color,
+                line_style
+            )
 
         self.update_pixmap()
 

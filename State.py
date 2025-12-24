@@ -30,7 +30,7 @@ class State(QMainWindow):
         self.grid_size = 4
 
         # 加载 UI
-        self.ui = QUiLoader().load("UI/main_new.ui")
+        self.ui = QUiLoader().load("UI/main.ui")
 
         # 将打印定向到指令输出部件
         self.cmd_out = self.ui.findChild(QTextEdit, "cmd_out")
@@ -323,7 +323,7 @@ class State(QMainWindow):
             elif self.current_mode == "多边形":
                 # 将鼠标点击位置转换到 image/scene 坐标
                 if self.current_shape is None:
-                    self.current_shape = PolygonShape([self.start_pos], self.pen_color)
+                    self.current_shape = PolygonShape([self.start_pos], self.pen_color, None, self.line_style)
                 else:
                     self.current_shape.points.append(self.start_pos)
                     # 临时绘制已有顶点连线
@@ -464,7 +464,7 @@ class State(QMainWindow):
             # 悬浮线闭合
             if len(self.current_shape.points) >= 2:
                 temp_points += [self.current_shape.points[0]]
-            self.canvas.draw_polygon_points(temp_points, self.current_shape.border_color)
+            self.canvas.draw_polygon_points(temp_points, self.current_shape.border_color, 'dash')
 
 
         elif self.start_pos and self.current_mode == "圆":

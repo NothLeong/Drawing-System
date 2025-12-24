@@ -22,12 +22,12 @@
 }</string>
   </property>
   <layout class="QVBoxLayout" name="verticalLayout_2">
-   <item alignment="Qt::AlignmentFlag::AlignLeft|Qt::AlignmentFlag::AlignTop">
+   <item>
     <widget class="QFrame" name="horizontalFrame">
      <property name="minimumSize">
       <size>
        <width>0</width>
-       <height>30</height>
+       <height>50</height>
       </size>
      </property>
      <property name="maximumSize">
@@ -36,11 +36,48 @@
        <height>50</height>
       </size>
      </property>
-     <layout class="QHBoxLayout" name="horizontalLayout" stretch="0,0,0">
+     <layout class="QHBoxLayout" name="horizontalLayout" stretch="0,0,0,0">
+      <item>
+       <layout class="QVBoxLayout" name="verticalLayout_4">
+        <item>
+         <widget class="QComboBox" name="curve_alg">
+          <property name="minimumSize">
+           <size>
+            <width>0</width>
+            <height>20</height>
+           </size>
+          </property>
+          <item>
+           <property name="text">
+            <string>Bezier</string>
+           </property>
+          </item>
+          <item>
+           <property name="text">
+            <string>B-Spline</string>
+           </property>
+          </item>
+         </widget>
+        </item>
+        <item>
+         <widget class="QToolButton" name="drag_control_points">
+          <property name="minimumSize">
+           <size>
+            <width>20</width>
+            <height>20</height>
+           </size>
+          </property>
+          <property name="text">
+           <string>拖拽控制顶点</string>
+          </property>
+         </widget>
+        </item>
+       </layout>
+      </item>
       <item>
        <spacer name="horizontalSpacer">
         <property name="orientation">
-         <enum>Qt::Orientation::Horizontal</enum>
+         <enum>Qt::Vertical</enum>
         </property>
         <property name="sizeHint" stdset="0">
          <size>
@@ -103,7 +140,7 @@
       <item>
        <widget class="QWidget" name="toolbox" native="true">
         <property name="layoutDirection">
-         <enum>Qt::LayoutDirection::LeftToRight</enum>
+         <enum>Qt::LeftToRight</enum>
         </property>
         <property name="styleSheet">
          <string notr="true">QWidget#toolbox {
@@ -112,7 +149,7 @@
         </property>
         <layout class="QVBoxLayout" name="verticalLayout">
          <property name="sizeConstraint">
-          <enum>QLayout::SizeConstraint::SetDefaultConstraint</enum>
+          <enum>QLayout::SetDefaultConstraint</enum>
          </property>
          <item>
           <widget class="QCheckBox" name="toggle_dash">
@@ -148,6 +185,26 @@
           </widget>
          </item>
          <item>
+          <widget class="QToolButton" name="curve">
+           <property name="styleSheet">
+            <string notr="true">background-color: gray;</string>
+           </property>
+           <property name="text">
+            <string>曲线</string>
+           </property>
+          </widget>
+         </item>
+         <item>
+          <widget class="QToolButton" name="surface">
+           <property name="styleSheet">
+            <string notr="true">background-color: gray</string>
+           </property>
+           <property name="text">
+            <string>曲面</string>
+           </property>
+          </widget>
+         </item>
+         <item>
           <widget class="QToolButton" name="polygon">
            <property name="styleSheet">
             <string notr="true">background-color: gray;</string>
@@ -160,7 +217,7 @@
          <item>
           <widget class="QToolButton" name="ellipse">
            <property name="layoutDirection">
-            <enum>Qt::LayoutDirection::LeftToRight</enum>
+            <enum>Qt::LeftToRight</enum>
            </property>
            <property name="styleSheet">
             <string notr="true">background-color: gray;</string>
