@@ -222,3 +222,92 @@ def draw_ellipse_midpoint(image, p1: QPointF, p2: QPointF, color, line_style):
             d2 += a2 * (-2 * y + 3)
         y -= 1
 
+
+# --- 曲线算法 ---
+# ----- bezier -------
+def de_casteljau(points, t):
+    """de Casteljau 递推算法"""
+    temp_points = [(p.x(), p.y()) for p in points]
+    n = len(temp_points)
+    for r in range(1, n):
+        for i in range(n - r):
+            x = (1 - t) * temp_points[i][0] + t * temp_points[i + 1][0]
+            y = (1 - t) * temp_points[i][1] + t * temp_points[i + 1][1]
+            temp_points[i] = (x, y)
+    return QPointF(temp_points[0][0], temp_points[0][1])
+
+# ---- B样条 -----
+def b_spline_basis(i, k, t, knots):
+    """B-样条基函数 (Cox-de Boor 递推)"""
+    if k == 1:
+        return 1.0 if knots[i] <= t < knots[i + 1] else 0.0
+
+    denom1 = knots[i + k - 1] - knots[i]
+    denom2 = knots[i + k] - knots[i + 1]
+
+    val1 = 0.0
+    if denom1 != 0:
+        val1 = ((t - knots[i]) / denom1) * b_spline_basis(i, k - 1, t, knots)
+
+    val2 = 0.0
+    if denom2 != 0:
+        val2 = ((knots[i + k] - t) / denom2) * b_spline_basis(i + 1, k - 1, t, knots)
+
+    return val1 + val2
+
+def calculate_b_spline_point(control_points, t, k, knots):
+    """
+    利用基函数计算 B-样条在参数 t 处的坐标
+    P(t) = Sum(P_i * N_{i,k}(t))
+    """
+    n = len(control_points)
+    x, y = 0.0, 0.0
+    for i in range(n):
+        basis = b_spline_basis(i, k, t, knots)
+        x += control_points[i].x() * basis
+        y += control_points[i].y() * basis
+    return QPointF(x, y)
+
+def generate_clamped_knots(n, k):
+    """
+    生成准均匀节点向量
+    n: 控制点个数, k: 阶数 (次数+1)
+    """
+    # 节点个数 = n + k
+    knots = [0] * k  # 开头 k 个 0
+    middle_count = n - k
+    for i in range(1, middle_count + 1):
+        knots.append(i)
+
+    end_val = middle_count + 1
+    knots += [end_val] * k  # 结尾 k 个 end_val
+    return knots
+
+
+# --- 曲面算法 ---
+from PySide6.QtGui import  QVector3D, QColor
+
+
+def de_casteljau_3d(points, t):
+    """
+    3D 版 de Casteljau 算法
+    points: QVector3D 列表
+    t: 0.0 ~ 1.0
+    """
+    if not points:
+        return QVector3D(0, 0, 0)
+
+    # 创建副本，避免修改原始控制点
+    temp = [QVector3D(p) for p in points]
+    n = len(temp)
+
+    # 迭代降维
+    for r in range(1, n):
+        for i in range(n - r):
+            # 线性插值: P_new = (1-t)P_curr + t*P_next
+            # QVector3D 支持这种直接的向量加减和标量乘法
+            temp[i] = temp[i] * (1 - t) + temp[i + 1] * t
+
+    return temp[0]
+
+

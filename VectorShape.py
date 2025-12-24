@@ -1,8 +1,9 @@
 # 矢量图基类
 from PySide6.QtCore import QPointF
 from PySide6.QtGui import QColor
-
+from math import hypot
 from Transform import Transform
+
 class VectorShape:
     def __init__(self, shape_type, border_color, fill_color, line_style='solid'):
         self.type = shape_type
@@ -155,4 +156,79 @@ class CircleShape(VectorShape):
 
     def drag_and_drop(self, dx, dy):
         self.centre = QPointF(self.centre.x()+dx, self.centre.y()+dy)
+
+class CurveShape(VectorShape):
+    def __init__(self, points, color, curve_type, line_style='solid'):
+        # 传递 None 给父类，因为我们自己管理 control_points
+        super().__init__("Curve", color, None, line_style)
+        self.control_points = points
+        self.curve_type = curve_type
+        self.precision = 100
+        # 曲线不需要存储 angle，因为我们直接修改点坐标
+        # 如果父类有 angle 属性，在这里将其锁定为 0 或忽略
+        self.angle = 0.0
+        self._update_centre()
+
+    def _update_centre(self):
+        if not self.control_points:
+            return
+        xs = [p.x() for p in self.control_points]
+        ys = [p.y() for p in self.control_points]
+        # 更新几何中心
+        self.centre = QPointF(sum(xs) / len(xs), sum(ys) / len(ys))
+
+    def get_sampled_points(self):
+        from tool import de_casteljau, b_spline_basis
+        sampled_pts = []
+        if not self.control_points:
+            return []
+
+        for i in range(self.precision + 1):
+            t = i / self.precision
+            if self.curve_type == "Bezier":
+                p = de_casteljau(self.control_points, t)
+            elif self.curve_type == "B-Spline":
+                p = b_spline_basis(self.control_points, t, k=4)
+            sampled_pts.append(p)
+        return sampled_pts
+
+    def contains(self, point: QPointF):
+        threshold = 5.0
+        curve_pts = self.get_sampled_points()
+        if not curve_pts:
+            return False
+
+        from tool import point_to_segment
+        for i in range(len(curve_pts) - 1):
+            dist = point_to_segment(point, curve_pts[i], curve_pts[i + 1])
+            if dist <= threshold:
+                return True
+        return False
+
+    def rotate(self, angle):
+        """
+        旋转操作：
+        对于曲线，我们直接修改控制点的物理坐标。
+        【关键】不要修改 self.angle，否则绘制时会导致双重旋转！
+        """
+        from Transform import Transform
+
+        # 1. 物理旋转控制点
+        self.control_points = Transform.rotate_points(self.control_points, self.centre, angle)
+
+        # 2. 旋转后，理论上中心点不变，但为了消除浮点误差，重新计算一下
+        self._update_centre()
+
+        # 3. 【重要】不要执行 self.angle += angle
+        # 因为点的坐标已经变了，如果再加 angle，View 在绘制时会再旋转一次。
+
+    def drag_and_drop(self, dx, dy):
+        """平移操作"""
+        from Transform import Transform
+
+        # 1. 物理平移控制点
+        self.control_points = Transform.dad_points(self.control_points, dx, dy)
+
+        # 2. 平移后，中心点必然改变，必须更新
+        self._update_centre()
 

@@ -4,22 +4,33 @@ from PySide6.QtWidgets import (
     QMainWindow, QGraphicsScene,
     QGraphicsView, QLabel, QToolButton, QTextEdit,
     QColorDialog, QFileDialog, QCommandLinkButton, QCheckBox, QGraphicsEllipseItem,
-    QGraphicsPolygonItem
+    QGraphicsPolygonItem, QComboBox
     )
 from PySide6.QtCore import Qt, Slot, QTimer, QPointF
 from PySide6.QtGui import QPen, QBrush, QPainter, QImage, QKeyEvent, QPixmap, QColor, QPolygonF
 
-from VectorShape import VectorShape, EllipseShape, PolygonShape
-from module import MyGraphicsView, RasterCanvas, CmdTextEdit, EmittingStr
+from VectorShape import VectorShape, EllipseShape, PolygonShape, CurveShape
+from module import MyGraphicsView, RasterCanvas, CmdTextEdit, EmittingStr, SurfaceEditorWindow
 from tool import make_rect, calc_radius
 import sys
+from OpenGL.GLUT import glutInit
 
 class State(QMainWindow):
     def __init__(self):
         super().__init__()
 
+        try:
+            glutInit(sys.argv)
+        except Exception:
+            pass # 防止多次初始化报错
+
+        # 控制网格顶点个数为n*n, n = bezier曲面的次数+1
+        # 现在是双三次曲面，故grid_size=4
+        # 调整grid_size即可改变曲面次数，但越高次数会越卡顿
+        self.grid_size = 4
+
         # 加载 UI
-        self.ui = QUiLoader().load("UI/main.ui")
+        self.ui = QUiLoader().load("UI/main_new.ui")
 
         # 将打印定向到指令输出部件
         self.cmd_out = self.ui.findChild(QTextEdit, "cmd_out")
@@ -95,6 +106,11 @@ class State(QMainWindow):
         self.pen_width = 2
         self.fill = False
         self.line_style = 'solid'
+        self.combo_alg = self.ui.findChild(QComboBox, "curve_alg")
+        self.curve_alg = self.combo_alg.currentText()
+
+        # 绑定combo和curve_alg的信号
+        self.combo_alg.currentTextChanged.connect(self.on_curve_alg_changed)
 
         # 视图特性
         self.view.setRenderHints(self.view.renderHints() | QPainter.RenderHint.Antialiasing)
@@ -104,6 +120,8 @@ class State(QMainWindow):
         self.ui.findChild(QCheckBox, "toggle_dash").clicked.connect(lambda: self.set_line_style('dash'))
         self.ui.findChild(QToolButton, "point").clicked.connect(lambda: self.set_mode("点"))
         self.ui.findChild(QToolButton, "line").clicked.connect(lambda: self.set_mode("直线"))
+        self.ui.findChild(QToolButton, "curve").clicked.connect(lambda: self.set_mode("曲线"))
+        self.ui.findChild(QToolButton, "surface").clicked.connect(self.open_surface_editor)  # 直接打开3D编辑窗口
         self.ui.findChild(QToolButton, "polygon").clicked.connect(lambda: self.set_mode("多边形"))
         self.ui.findChild(QToolButton, "ellipse").clicked.connect(lambda: self.set_mode("椭圆"))
         self.ui.findChild(QToolButton, "circle").clicked.connect(lambda: self.set_mode("圆"))
@@ -112,6 +130,7 @@ class State(QMainWindow):
         self.ui.findChild(QToolButton, "rotate").clicked.connect(lambda: self.set_mode("旋转"))
         self.ui.findChild(QToolButton, "color_choose").clicked.connect(lambda: self.choose_color())
         self.ui.findChild(QToolButton, "fill_toggle").clicked.connect(lambda: self.set_mode("填充"))
+        self.ui.findChild(QToolButton, "drag_control_points").clicked.connect(lambda: self.set_mode("编辑曲线顶点"))
         self.ui.findChild(QToolButton, "save").clicked.connect(lambda: self.save_scene())
 
         # 当前选中VectorShape
@@ -119,6 +138,13 @@ class State(QMainWindow):
 
         self.drag_offset = 0
         self.last_mouse_for_rotate = None
+
+        self.selected_curve_shape = None  # 当前选中的曲线对象
+        self.selected_point_index = -1  # 当前选中点的索引
+
+        # 3D 曲面表示窗口
+        self.surface_editor = None
+
 
     def _update_label_position(self):
         """保持坐标标签在画布右下角"""
@@ -249,23 +275,50 @@ class State(QMainWindow):
     @Slot()
     def set_mode(self, shape_name):
         self.current_mode = shape_name
+        self.canvas.show_curve_skeletons = False
         print(f"当前模式：{shape_name}")
         if self.current_mode == "多边形":
             print("左键选取端点，右键确定最后一个端点并画出最终的多边形")
+        elif self.current_mode == "曲线":
+            print(f"当前算法{self.curve_alg}。左键选取控制多边形端点，右键确定最后一个端点并画出最终的曲线")
+        elif self.current_mode == "编辑曲线顶点":
+            self.canvas.show_curve_skeletons = True
+            print("已显示控制顶点，请拖拽调整")
+        self.canvas.redraw()
 
     @Slot()
     def mouse_press_event(self, event):
-        if event.button() == Qt.MouseButton.RightButton and self.current_shape is not None and self.current_shape.type == "Polygon":
-            self.start_pos = self.view.mapToScene(event.position().toPoint())
-            self.current_shape.points.append(self.start_pos)
-            self.canvas.draw_polygon(self.current_shape, "image")
-            self.canvas.shapes.append(self.current_shape)
-            self.current_shape = None
+        if event.button() == Qt.MouseButton.RightButton:
+            self.canvas.clear_temp()
+            if self.current_shape is not None and self.current_shape.type == "Polygon":
+                self.start_pos = self.view.mapToScene(event.position().toPoint())
+                self.current_shape.points.append(self.start_pos)
+                self.canvas.draw_polygon(self.current_shape, "image")
+                self.canvas.shapes.append(self.current_shape)
+                self.current_shape = None
+            elif self.current_shape is not None and self.current_shape.type == "Curve":
+                self.start_pos = self.view.mapToScene(event.position().toPoint())
+                self.current_shape.control_points.append(self.start_pos)
+                self.canvas.draw_curve(self.current_shape, "image")
+                self.canvas.shapes.append(self.current_shape)
+                self.current_shape = None
+            self.start_pos = None
         elif event.button() == Qt.MouseButton.LeftButton:
             self.start_pos = self.view.mapToScene(event.position().toPoint())
 
-            # 画图形
-            if self.current_mode in ("圆", "椭圆", "直线"):
+            if self.current_mode == "编辑曲线顶点":
+                # 检测是否点中了某个曲线的控制点
+                found = self.canvas.find_control_point(self.start_pos)
+                if found:
+                    self.selected_curve_shape, self.selected_point_index = found
+                    print(f"选中控制点: 索引 {self.selected_point_index}")
+                else:
+                    self.selected_curve_shape = None
+                    self.selected_point_index = -1
+                return
+
+            # ------- 画图形 --------
+            elif self.current_mode in ("圆", "椭圆", "直线"):
                 return
             elif self.current_mode == "多边形":
                 # 将鼠标点击位置转换到 image/scene 坐标
@@ -273,11 +326,18 @@ class State(QMainWindow):
                     self.current_shape = PolygonShape([self.start_pos], self.pen_color)
                 else:
                     self.current_shape.points.append(self.start_pos)
+                    # 临时绘制已有顶点连线
+                    self.canvas.draw_polygon(self.current_shape, "temp")
+            elif self.current_mode == "曲线":
+                self.canvas.clear_temp()
+                if self.current_shape is None:
+                    self.current_shape = CurveShape([self.start_pos], self.pen_color, self.curve_alg, self.line_style)
+                else:
+                    self.current_shape.control_points.append(self.start_pos)
+                    self.canvas.draw_curve(self.current_shape, "temp")
+                    self.canvas.draw_curve_skeleton(self.current_shape)
 
-                # 临时绘制已有顶点连线
-                self.canvas.draw_polygon(self.current_shape, "temp")
-
-            if self.current_mode == "平移":
+            elif self.current_mode == "平移":
                 # 记录平移起点（scene 坐标）
                 self.pan_start = self.view.mapToScene(event.position().toPoint())
                 return
@@ -295,7 +355,6 @@ class State(QMainWindow):
 
                 self.canvas.update_pixmap()
 
-                self.canvas.update_pixmap()
             elif self.current_mode == "填充":
                 print(f"在{self.start_pos}处进行填充")
                 self.canvas.fill_at_point(self.start_pos, self.pen_color)
@@ -316,7 +375,6 @@ class State(QMainWindow):
                                                self.start_pos.y() - c.y())
                 return
 
-            self.start_pos = None
 
     @Slot()
     def mouse_move_event(self, event):
@@ -326,8 +384,17 @@ class State(QMainWindow):
 
         # 实时更新鼠标坐标
         self.update_mouse_pos(end_pos)
+        self.canvas.clear_temp()
 
-        if self.current_mode == "平移" and hasattr(self, "pan_start"):
+        if self.current_mode == "编辑曲线顶点" and self.selected_curve_shape:
+            # 更新控制点坐标
+            self.selected_curve_shape.control_points[self.selected_point_index] = end_pos
+            # 更新曲线中心（因为点变了）
+            self.selected_curve_shape._update_centre()
+            # 强制重绘：redraw 会根据 show_curve_skeletons 重新画出骨架和新曲线
+            self.canvas.redraw()
+            return
+        elif self.current_mode == "平移" and hasattr(self, "pan_start"):
             # 当前鼠标位置（scene 坐标）
             current_pos = self.view.mapToScene(event.position().toPoint())
             # 计算位移增量
@@ -358,7 +425,6 @@ class State(QMainWindow):
 
 
         elif self.start_pos and self.current_mode == "拖放":
-            self.canvas.clear_temp()
             if self.current_shape is not None:
                 # 计算图形的新中心 = 鼠标位置 - 偏移
                 new_centre = QPointF(end_pos.x() - self.drag_offset.x(),
@@ -376,7 +442,17 @@ class State(QMainWindow):
             self.canvas.draw_temp_line(x0, y0, x1, y1, self.pen_color, self.line_style)
             # canvas.draw_temp_line 已经在内部调用 update_pixmap()
 
-        if self.start_pos and self.current_mode == "椭圆":
+        elif self.start_pos and self.current_mode == "曲线":
+            # 绘制控制多边形 + 曲线预览
+            temp_points = self.current_shape.control_points[:] + [end_pos]
+            temp_cur = CurveShape(temp_points[:],
+                                  self.current_shape.border_color,
+                                  self.current_shape.curve_type,
+                                  'dash')
+            self.canvas.draw_curve_skeleton(temp_cur)
+            self.canvas.draw_curve(temp_cur, 'temp')
+
+        elif self.start_pos and self.current_mode == "椭圆":
             # 在temp层画椭圆
             from VectorShape import EllipseShape
             ellipse = EllipseShape(self.start_pos, end_pos, self.pen_color, None, self.line_style)
@@ -384,20 +460,26 @@ class State(QMainWindow):
 
         elif self.current_mode == "多边形" and self.current_shape is not None:
             temp_points = self.current_shape.points + [end_pos]
-            # 绘制临时悬浮线（只画线，不写入 image）
+            # 绘制临时悬浮线
             # 悬浮线闭合
             if len(self.current_shape.points) >= 2:
                 temp_points += [self.current_shape.points[0]]
             self.canvas.draw_polygon_points(temp_points, self.current_shape.border_color)
 
 
-        if self.start_pos and self.current_mode == "圆":
+        elif self.start_pos and self.current_mode == "圆":
             r = calc_radius(self.start_pos, end_pos)
             self.canvas.draw_temp_circle(self.start_pos, r, self.pen_color, self.line_style)
 
     @Slot()
     def mouse_release_event(self, event):
-        if not self.start_pos:
+        if not self.start_pos or self.current_mode in ("多边形", "曲线"):
+            return
+
+        elif self.current_mode == "编辑曲线顶点":
+            self.selected_curve_shape = None
+            self.selected_point_index = -1
+            self.start_pos = None
             return
 
         end_pos = self.view.mapToScene(event.position().toPoint())
@@ -421,22 +503,22 @@ class State(QMainWindow):
             # 直接写入主图（会扩展并 update）
             self.canvas.draw_line_to_image(x0, y0, x1, y1, self.pen_color, self.line_style)
 
-        if self.current_mode == "椭圆":
+        elif self.current_mode == "椭圆":
             # 添加正式椭圆
             ellipse = EllipseShape(self.start_pos, end_pos, self.pen_color, self.line_style)
             self.canvas.shapes.append(ellipse)
             self.canvas.draw_ellipse(ellipse, 'image')
 
-        if self.current_mode == "圆":
+        elif self.current_mode == "圆":
             r = calc_radius(self.start_pos, end_pos)
             self.canvas.draw_circle_to_image(self.start_pos, r, self.pen_color, self.line_style)
 
-        if self.current_mode == "矩形":
+        elif self.current_mode == "矩形":
             p_start, p_end = self.start_pos, end_pos
             rect = make_rect(p_start, p_end)
             self.scene.addRect(rect[0], rect[1], rect[2], rect[3], pen, brush)
 
-        if self.current_mode == "旋转" or self.current_mode == "拖放":
+        elif self.current_mode == "旋转" or self.current_mode == "拖放":
             self.canvas.redraw()  # 将image层清空，根据矢量图记录来作画
 
         self.start_pos = None
@@ -448,6 +530,41 @@ class State(QMainWindow):
         if self.pos_label:
             self.pos_label.setText(f"({scene_pos.x():.1f}, {scene_pos.y():.1f})")
 
+    def on_curve_alg_changed(self, text):
+        """
+        当下拉菜单改变时调用
+        text: 选中的文本，例如 "Bezier" 或 "B-Spline"
+        """
+        # 1. 更新 State 的成员变量
+        self.curve_alg = text
+        print(f"当前曲线算法已切换为: {self.curve_alg}")
 
+        # 如果当前正好选中了一条曲线，直接把它的算法也改了并重绘
+        if self.current_shape and self.current_shape.type == 'Curve':
+            self.current_shape.curve_type = self.curve_alg
+            self.canvas.redraw()
+
+    def open_surface_editor(self):
+        """ 打开 3D 双三次 Bézier 曲面编辑器 """
+
+        # 1. 检查是否已经创建过窗口
+        if self.surface_editor is None:
+            # 传入 self 作为 parent，建立父子关系
+            # 这样主窗口关闭时，子窗口也会自动关闭，且不会被垃圾回收
+            self.surface_editor = SurfaceEditorWindow(self)
+
+        # 2. 显示窗口 (如果是隐藏状态则显示)
+        self.surface_editor.show()
+
+        # 3. 如果窗口被最小化了，恢复它
+        if self.surface_editor.isMinimized():
+            self.surface_editor.showNormal()
+
+        # 4. 置顶并激活，防止被主窗口挡住看不到
+        self.surface_editor.raise_()
+        self.surface_editor.activateWindow()
+
+        # (可选) 更新状态栏或输出日志
+        print("指令: 打开 3D 曲面编辑器")
 
 
